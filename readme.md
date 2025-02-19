@@ -33,26 +33,38 @@ services:
       DISK_SIZE: "16G"
     devices:
       - /dev/kvm
+      - /dev/net/tun
     cap_add:
       - NET_ADMIN
     ports:
       - 5000:5000
     volumes:
       - /var/dsm:/storage
+    restart: always
     stop_grace_period: 2m
 ```
 
 Via Docker CLI:
 
 ```bash
-docker run -it --rm -p 5000:5000 --device=/dev/kvm --cap-add NET_ADMIN --stop-timeout 120 vdsm/virtual-dsm
+docker run -it --rm -p 5000:5000 --device=/dev/kvm --device=/dev/net/tun --cap-add NET_ADMIN --stop-timeout 120 vdsm/virtual-dsm
 ```
 
 Via Kubernetes:
 
 ```shell
-kubectl apply -f kubernetes.yml
+kubectl apply -f https://raw.githubusercontent.com/vdsm/virtual-dsm/refs/heads/master/kubernetes.yml
 ```
+
+## Compatibility ⚙️
+
+| **Product**  | **Platform**   | |
+|---|---|---|
+| Docker Engine | Linux| ✅ |
+| Docker Desktop | Linux | ❌ |
+| Docker Desktop | macOS | ❌ |
+| Docker Desktop | Windows 11 | ✅ |
+| Docker Desktop | Windows 10 | ❌ |
 
 ## FAQ 💬
 
@@ -64,7 +76,7 @@ kubectl apply -f kubernetes.yml
 
   - Wait until DSM is ready, choose an username and password, and you will be taken to the desktop.
   
-  Enjoy your brand new machine, and don't forget to star this repo!
+  Enjoy your brand new NAS, and don't forget to star this repo!
 
 ### How do I change the storage location?
 
@@ -147,24 +159,28 @@ kubectl apply -f kubernetes.yml
 
 ### How do I verify if my system supports KVM?
 
-  To verify that your system supports KVM, run the following commands:
+  Only Linux and Windows 11 support KVM virtualization, macOS and Windows 10 do not unfortunately.
+  
+  You can run the following commands in Linux to check your system:
 
   ```bash
   sudo apt install cpu-checker
   sudo kvm-ok
   ```
 
-  If you receive an error from `kvm-ok` indicating that KVM acceleration can't be used, please check whether:
+  If you receive an error from `kvm-ok` indicating that KVM cannot be used, please check whether:
 
   - the virtualization extensions (`Intel VT-x` or `AMD SVM`) are enabled in your BIOS.
-
-  - you are running an operating system that supports them, like Linux or Windows 11 (macOS and Windows 10 do not unfortunately).
 
   - you enabled "nested virtualization" if you are running the container inside a virtual machine.
 
   - you are not using a cloud provider, as most of them do not allow nested virtualization for their VPS's.
 
-  If you didn't receive any error from `kvm-ok` at all, but the container still complains that `/dev/kvm` is missing, it might help to add `privileged: true` to your compose file (or `--privileged` to your `run` command), to rule out any permission issue.
+  If you do not receive any error from `kvm-ok` but the container still complains about KVM, please check whether:
+
+  - you are not using "Docker Desktop for Linux" as it does not support KVM, instead make use of Docker Engine directly.
+ 
+  - it could help to add `privileged: true` to your compose file (or `sudo` to your `docker run` command), to rule out any permission issue.
 
 ### How do I assign an individual IP address to the container?
 

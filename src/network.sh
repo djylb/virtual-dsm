@@ -6,8 +6,9 @@ set -Eeuo pipefail
 : "${MAC:=""}"
 : "${DHCP:="N"}"
 : "${NETWORK:="Y"}"
-: "${HOST_PORTS:=""}"
 : "${USER_PORTS:=""}"
+: "${HOST_PORTS:=""}"
+: "${ADAPTER:="virtio-net-pci"}"
 
 : "${VM_NET_DEV:=""}"
 : "${VM_NET_TAP:="dsm"}"
@@ -35,12 +36,27 @@ configureDHCP() {
   fi
 
   # Create a macvtap network for the VM guest
-  { ip link add link "$VM_NET_DEV" name "$VM_NET_TAP" address "$VM_NET_MAC" type macvtap mode bridge ; rc=$?; } || :
+  { msg=$(ip link add link "$VM_NET_DEV" name "$VM_NET_TAP" address "$VM_NET_MAC" type macvtap mode bridge 2>&1); rc=$?; } || :
 
-  if (( rc != 0 )); then
-    error "Cannot create macvtap interface. Please make sure that the network type is 'macvlan' and not 'ipvlan',"
-    error "that your kernel is recent (>4) and supports it, and that the container has the NET_ADMIN capability set." && return 1
-  fi
+  case "$msg" in
+    "RTNETLINK answers: File exists"* )
+      while ! ip link add link "$VM_NET_DEV" name "$VM_NET_TAP" address "$VM_NET_MAC" type macvtap mode bridge; do
+        info "Waiting for macvtap interface to become available.."
+        sleep 5
+      done  ;;
+    "RTNETLINK answers: Invalid argument"* )
+      error "Cannot create macvtap interface. Please make sure that the network type of the container is 'macvlan' and not 'ipvlan'."
+      return 1 ;;
+    "RTNETLINK answers: Operation not permitted"* )
+      error "No permission to create macvtap interface. Please make sure that your host kernel supports it and that the NET_ADMIN capability is set." 
+      return 1 ;;
+    *)
+      [ -n "$msg" ] && echo "$msg" >&2
+      if (( rc != 0 )); then
+        error "Cannot create macvtap interface."
+        return 1
+      fi ;;
+  esac
 
   while ! ip link set "$VM_NET_TAP" up; do
     info "Waiting for MAC address $VM_NET_MAC to become available..."
@@ -152,6 +168,9 @@ configureUser() {
 
 configureNAT() {
 
+  local tuntap="TUN device is missing. $ADD_ERR --device /dev/net/tun"
+  local tables="The 'ip_tables' kernel module is not loaded. Try this command: sudo modprobe ip_tables iptable_nat"
+
   # Create the necessary file structure for /dev/net/tun
   if [ ! -c /dev/net/tun ]; then
     [ ! -d /dev/net ] && mkdir -m 755 /dev/net
@@ -161,7 +180,7 @@ configureNAT() {
   fi
 
   if [ ! -c /dev/net/tun ]; then
-    error "TUN device missing. $ADD_ERR --device /dev/net/tun --cap-add NET_ADMIN" && return 1
+    error "$tuntap" && return 1
   fi
 
   # Check port forwarding flag
@@ -171,9 +190,6 @@ configureNAT() {
       error "IP forwarding is disabled. $ADD_ERR --sysctl net.ipv4.ip_forward=1" && return 1
     fi
   fi
-
-  local tables="The 'ip_tables' kernel module is not loaded. Try this command: sudo modprobe ip_tables iptable_nat"
-  local tuntap="The 'tun' kernel module is not available. Try this command: 'sudo modprobe tun' or run the container with 'privileged: true'."
 
   # Create a bridge with a static IP for the VM guest
 
@@ -286,13 +302,19 @@ checkOS() {
 
   local name
   local os=""
+  local if="macvlan"
   name=$(uname -a)
 
-  [[ "${name,,}" == *"darwin"* ]] && os="MacOS"
-  [[ "${name,,}" == *"microsoft"* ]] && os="Windows"
+  [[ "${name,,}" == *"darwin"* ]] && os="Docker Desktop for macOS"
+  [[ "${name,,}" == *"microsoft"* ]] && os="Docker Desktop for Windows"
+
+  if [[ "$DHCP" == [Yy1]* ]]; then
+    if="macvtap"
+    [[ "${name,,}" == *"synology"* ]] && os="Synology Container Manager"
+  fi
 
   if [ -n "$os" ]; then
-    warn "you are using Docker Desktop for $os which does not support macvlan, please revert to bridge networking!"
+    warn "you are using $os which does not support $if, please revert to bridge networking!"
   fi
 
   return 0
@@ -367,6 +389,11 @@ if [[ "$IP" == "172.17."* ]]; then
   warn "your container IP starts with 172.17.* which will cause conflicts when you install the Container Manager package inside DSM!"
 fi
 
+if [[ -d "/sys/class/net/$VM_NET_TAP" ]]; then                                               
+    info "Lingering interface will be removed..."                        
+    ip link delete "$VM_NET_TAP" || true
+fi
+
 if [[ "$DHCP" == [Yy1]* ]]; then
 
   checkOS
@@ -397,7 +424,7 @@ else
     if ! configureNAT; then
 
       NETWORK="user"
-      warn "falling back to usermode networking! Performance will be bad and port forwarding will not work."
+      warn "falling back to usermode networking! Performance will be bad and port mapping will not work."
 
       ip link set "$VM_NET_TAP" down promisc off &> null || true
       ip link delete "$VM_NET_TAP" &> null || true
@@ -418,6 +445,6 @@ else
 
 fi
 
-NET_OPTS+=" -device virtio-net-pci,romfile=,netdev=hostnet0,mac=$VM_NET_MAC,id=net0"
+NET_OPTS+=" -device $ADAPTER,romfile=,netdev=hostnet0,mac=$VM_NET_MAC,id=net0"
 
 return 0

@@ -15,23 +15,24 @@ echo "❯ For support visit $SUPPORT"
 
 # Docker environment variables
 
-: "${TZ:=""}"             # System local timezone
-: "${DEBUG:="N"}"         # Disable debugging mode
-: "${COUNTRY:=""}"        # Country code for mirror
-: "${CONSOLE:="N"}"       # Disable console mode
-: "${ALLOCATE:=""}"       # Preallocate diskspace
-: "${ARGUMENTS:=""}"      # Extra QEMU parameters
-: "${CPU_CORES:="1"}"     # Amount of CPU cores
-: "${RAM_SIZE:="1G"}"     # Maximum RAM amount
-: "${RAM_CHECK:="Y"}"     # Check available RAM
-: "${DISK_SIZE:="16G"}"   # Initial data disk size
+: "${TZ:=""}"              # System local timezone
+: "${DEBUG:="N"}"          # Disable debugging mode
+: "${COMMIT:="N"}"         # Commit to local image
+: "${COUNTRY:=""}"         # Country code for mirror
+: "${CONSOLE:="N"}"        # Disable console mode
+: "${ALLOCATE:=""}"        # Preallocate diskspace
+: "${ARGUMENTS:=""}"       # Extra QEMU parameters
+: "${CPU_CORES:="1"}"      # Amount of CPU cores
+: "${RAM_SIZE:="1G"}"      # Maximum RAM amount
+: "${RAM_CHECK:="Y"}"      # Check available RAM
+: "${DISK_SIZE:="16G"}"    # Initial data disk size
+: "${STORAGE:="/storage"}" # Storage folder location
 
 # Helper variables
 
 PROCESS="${APP,,}"
 PROCESS="${PROCESS// /-}"
 
-STORAGE="/storage"
 INFO="/run/shm/msg.html"
 PAGE="/run/shm/index.html"
 TEMPLATE="/var/www/index.html"
@@ -63,7 +64,13 @@ if [ -z "${CPU// /}" ] && grep -qi "model:" <<< "$CPI"; then
 fi
 
 CPU="${CPU// CPU/}"
+CPU="${CPU// 8 Core/}"
+CPU="${CPU// 16 Core/}"
+CPU="${CPU// 32 Core/}"
+CPU="${CPU// 64 Core/}"
+CPU="${CPU// Processor/}"
 CPU="${CPU// Quad core/}"
+CPU="${CPU// Core TM/ Core}"
 CPU="${CPU// with Radeon Graphics/}"
 [ -z "${CPU// /}" ] && CPU="Unknown"
 
@@ -77,8 +84,13 @@ fi
 
 # Check folder
 
-if [ ! -d "$STORAGE" ]; then
-  error "Storage folder ($STORAGE) not found!" && exit 13
+if [[ "$COMMIT" != [Nn]* ]]; then
+  STORAGE="/local"
+  mkdir -p "$STORAGE"
+else
+  if [ ! -d "$STORAGE" ]; then
+    error "Storage folder ($STORAGE) not found!" && exit 13
+  fi
 fi
 
 # Check filesystem
@@ -101,11 +113,13 @@ WANTED_GB=$(( (RAM_WANTED + 1073741823)/1073741824 ))
 
 # Print system info
 SYS="${SYS/-generic/}"
+FS="${FS/UNKNOWN //}"
 FS="${FS/ext2\/ext3/ext4}"
+FS=$(echo "$FS" | sed 's/[)(]//g')
 SPACE=$(df --output=avail -B 1 "$STORAGE" | tail -n 1)
 SPACE_GB=$(( (SPACE + 1073741823)/1073741824 ))
 
-echo "❯ CPU: ${CPU} | RAM: $AVAIL_GB/$TOTAL_GB GB | DISK: $SPACE_GB GB (${FS}) | HOST: ${SYS}..."
+echo "❯ CPU: ${CPU} | RAM: $AVAIL_GB/$TOTAL_GB GB | DISK: $SPACE_GB GB (${FS}) | KERNEL: ${SYS}..."
 echo
 
 # Check memory
